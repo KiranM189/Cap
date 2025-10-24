@@ -1,0 +1,28 @@
+body { 
+    margin: 0; overflow: hidden; 
+}
+
+#btn1, #btn2 , #btn3 {
+  position: absolute;
+  top: 20px;
+  padding: 10px 20px;
+  font-size: 16px;
+  z-index: 1000;
+}
+#Container {
+  width: 1000px; 
+  height: 600px;
+  border: 1px solid #000;
+}
+
+#btn {
+  left: 20px;
+}
+
+#btn2 {
+  left: 120px;
+}
+
+#btn3 {
+  left: 240px;
+}

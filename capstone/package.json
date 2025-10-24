@@ -1,0 +1,26 @@
+{
+  "name": "realtime-model-movement",
+  "version": "1.0.0",
+  "description": "Three.js model moving with real-time sensor data",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "sensor": "node sensorServer.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "kalmanjs": "^1.1.0",
+    "mqtt": "^5.10.4",
+    "node-fetch": "^3.3.2",
+    "three": "^0.172.0",
+    "three-gltf-loader": "^1.111.0",
+    "ws": "^8.18.1"
+  },
+  "devDependencies": {
+    "vite": "^6.0.11"
+  },
+  "engines": {
+    "node": ">=18.20.6"
+  }
+}
