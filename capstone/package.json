@@ -2,7 +2,7 @@
   "name": "realtime-model-movement",
   "version": "1.0.0",
   "description": "Three.js model moving with real-time sensor data",
-  "main": "server.js",
+  "main": "main.js",
   "scripts": {
     "start": "node server.js",
     "sensor": "node sensorServer.js"
