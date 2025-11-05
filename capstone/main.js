@@ -57,8 +57,6 @@ new GLTFLoader().load('/ybot.gltf', (gltf) => {
     model = gltf.scene;
 
     model.traverse((child) => {
-        // const axesHelper = new THREE.AxesHelper(1);
-        // model.add(axesHelper);
         if (child.isBone) {
             // const axes = new THREE.AxesHelper(20); // adjust size as needed
             // child.add(axes);
@@ -80,19 +78,16 @@ new GLTFLoader().load('/ybot.gltf', (gltf) => {
 //  WebSocket Management
 // =============================
 const sensorSockets = {
-    RFA: "10.148.16.90",
-    RA: "10.148.16.85",
-    // RFA: "192.168.103.225",
-    LA: "10.148.16.203",
-    LFA: "10.148.16.178",
-    // RUL: "192.168.103.85",
-    // RL: "192.168.103.203",
-    // SP1: "192.168.103.84",
+    LFA:"10.148.16.225",
+    // RFA:"10.148.16.203",
+    LA:"10.148.16.203",
+    // RA:"10.148.16.85",
 };
 
 const sockets = {};
 const connected = [];
-var count = 0;
+let count = 0;
+
 function connectSensor(label, ip) {
     const ws = new WebSocket(`ws://${ip}:81`);
 
@@ -100,40 +95,92 @@ function connectSensor(label, ip) {
         connected.push(label);
         sockets[label] = ws;
         console.log(`✅ Connected to sensor: ${label}`);
-        count +=1;
+        count += 1;
     };
 
-    ws.onerror = (err) => console.error(`❌ WebSocket error (${label}):`);
-
-    // ws.onclose = () => {
-    //     console.warn(`⚠️ ${label} disconnected. Reconnecting in 3s...`);
-    //     setTimeout(() => connectSensor(label, ip), 3000);
-    // };
+    ws.onerror = (err) => console.error(`❌ WebSocket error (${label}):`, err);
 
     ws.onmessage = (event) => handleSensorMessage(label, event);
 }
 
+// =============================
+// 🧭 Calibration Logic (Client-side)
+// =============================
+const calibrationData = {};
+const qRef = {};
+let isCalibrating = false,calibrated = false;
+const CALIBRATION_DURATION = 30000; // 30 seconds
+var calibrationStartTime = 0;
+
+function normalizeQuat(q) {
+    const len = Math.hypot(q.w, q.x, q.y, q.z);
+    return len > 0 ? { w: q.w / len, x: q.x / len, y: q.y / len, z: q.z / len } : q;
+}
+
+function startCalibration() {
+    isCalibrating = true;
+    calibrationStartTime = performance.now();
+    for (const label of connected) {
+        calibrationData[label] = [];
+    }
+
+    console.log("🟡 Collecting T-Pose samples for 30 seconds...");
+    let countdown = 30;
+    const interval = setInterval(() => {
+        console.log(`⏳ ${countdown--}s remaining...`);
+    }, 1000);
+
+    setTimeout(() => {
+        clearInterval(interval);
+        finishCalibration();
+    }, CALIBRATION_DURATION);
+}
+
+function finishCalibration() {
+    console.log("🟢 T-Pose calibration done!");
+    for (const label of connected) {
+        const samples = calibrationData[label];
+        if (samples && samples.length > 0) {
+            let sum = { w: 0, x: 0, y: 0, z: 0 };
+            for (const q of samples) {
+                sum.w += q.w;
+                sum.x += q.x;
+                sum.y += q.y;
+                sum.z += q.z;
+            }
+            const avg = {
+                w: sum.w / samples.length,
+                x: sum.x / samples.length,
+                y: sum.y / samples.length,
+                z: sum.z / samples.length
+            };
+            qRef[label] = normalizeQuat(avg);
+            console.log(`✅ ${label} reference quaternion:`, qRef[label]);
+        }
+    }
+    isCalibrating = false;
+    calibrated = true;
+    alert("✅ T-Pose calibration completed!");
+}
+
+function applyCalibration(label, qNow) {
+    const ref = qRef[label];
+    if (!ref) return qNow;
+
+    const conjugate = new THREE.Quaternion(-ref.x, -ref.y, -ref.z, ref.w);
+    const qRelative = new THREE.Quaternion().copy(conjugate).multiply(qNow);
+    qRelative.normalize();
+    return qRelative;
+}
+
+// =============================
+//  Message Handling
+// =============================
 function handleSensorMessage(label, event) {
-    var lcount = 0, lt_count = 0;
     try {
         const data = JSON.parse(event.data);
 
-        // Alerts for calibration messages
-        if (data.msg) {
-            if (data.msg === "Still") {
-                lcount += 1;
-                if(lcount == count){
-                    alert("✅ Still calibration completed");
-                }
-            } else if (data.msg === "T-Pose") {
-                lt_count += 1;
-                if(lt_count == count){
-                    alert("✅ T-Pose calibration completed");
-                }
-            }
-            return;
-        }
-        // Validate quaternion data
+        // Ignore messages without quaternion data
         if (!Array.isArray(data.quaternion) || data.quaternion.length !== 4) return;
 
         const bone = boneMap[data.label];
@@ -144,7 +191,19 @@ function handleSensorMessage(label, event) {
 
         const [w, x, y, z] = data.quaternion;
         const q = new THREE.Quaternion(x, y, z, w);
-        bone.quaternion.copy(q); // Smooth blend
+
+        if (isCalibrating) {
+            if (calibrationData[label]) {
+                calibrationData[label].push({ w, x, y, z });
+            }
+            return;
+        }
+        
+        if(calibrated) {
+            const calibratedQ = applyCalibration(label, q);
+            bone.quaternion.copy(calibratedQ); // Smooth blend  
+        }
+        
 
     } catch (err) {
         console.error(`❌ Failed to parse message for ${label}:`, err);
@@ -172,10 +231,12 @@ btn2.onclick = () => {
 };
 
 btn3.onclick = () => {
+    // Tell all sensors to start streaming (they don’t average anymore)
     for (const label of connected) {
         const ws = sockets[label];
         if (ws?.readyState === WebSocket.OPEN) ws.send("calibrate");
     }
+    startCalibration();
 };
 
 // =============================
